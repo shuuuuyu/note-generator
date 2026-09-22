@@ -1,0 +1,1321 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>筆記內頁產生器</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #f7f6f3;
+    --panel: #ffffff;
+    --border: #e4e2dd;
+    --text: #1a1a1a;
+    --text-muted: #888;
+    --accent: #4a7c6f;
+    --accent-light: #e8f0ee;
+    --radius: 10px;
+    --shadow: 0 2px 12px rgba(0,0,0,0.07);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  header {
+    padding: 14px 24px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+  }
+
+  header h1 {
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--text);
+  }
+
+  header span {
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  .workspace {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* ── Panel ── */
+  .panel {
+    width: 300px;
+    flex-shrink: 0;
+    background: var(--panel);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 20px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+  }
+
+  .panel::-webkit-scrollbar { width: 4px; }
+  .panel::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  /* ── Resizer ── */
+  .resizer {
+    width: 5px;
+    flex-shrink: 0;
+    background: var(--border);
+    cursor: col-resize;
+    position: relative;
+    transition: background 0.15s;
+  }
+  .resizer:hover, .resizer.dragging { background: var(--accent); }
+  .resizer::after {
+    content: '⋮';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 14px;
+    color: var(--text-muted);
+    pointer-events: none;
+    line-height: 1;
+  }
+
+  .section-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+  }
+
+  /* Layout tabs */
+  .layout-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .layout-btn {
+    border: 1.5px solid var(--border);
+    background: #fff;
+    border-radius: var(--radius);
+    padding: 10px 8px;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.15s;
+  }
+
+  .layout-btn:hover { border-color: var(--accent); }
+  .layout-btn.active {
+    border-color: var(--accent);
+    background: var(--accent-light);
+  }
+
+  .layout-btn svg { width: 36px; height: 28px; }
+
+  .layout-btn span {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text);
+  }
+
+  /* Params */
+  .param-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+  }
+
+  .param-row label {
+    font-size: 12px;
+    color: var(--text);
+    flex-shrink: 0;
+  }
+
+  .param-row .right {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .param-row .val {
+    font-size: 11px;
+    color: var(--text-muted);
+    min-width: 32px;
+    text-align: right;
+  }
+
+  input[type=range] {
+    -webkit-appearance: none;
+    width: 110px;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    outline: none;
+  }
+
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+  }
+
+  select {
+    font-size: 12px;
+    border: 1.5px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 8px;
+    background: #fff;
+    color: var(--text);
+    cursor: pointer;
+    outline: none;
+  }
+
+  select:focus { border-color: var(--accent); }
+
+  /* Color section */
+  .color-section { display: flex; flex-direction: column; gap: 12px; }
+
+  .color-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .color-row label { font-size: 12px; }
+
+  .color-right { display: flex; align-items: center; gap: 6px; }
+
+  .swatch-group { display: flex; gap: 4px; }
+
+  .swatch {
+    width: 20px;
+    height: 20px;
+    border-radius: 4px;
+    cursor: pointer;
+    border: 1.5px solid transparent;
+    transition: transform 0.1s;
+    flex-shrink: 0;
+  }
+
+  .swatch:hover { transform: scale(1.15); }
+  .swatch.active { border-color: var(--accent); }
+
+  .color-category {
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+    margin-top: 4px;
+  }
+
+  input[type=color] {
+    width: 26px;
+    height: 26px;
+    border: 1.5px solid var(--border);
+    border-radius: 5px;
+    padding: 1px;
+    cursor: pointer;
+    background: none;
+  }
+
+  /* Checkbox rows */
+  .check-grid { display: flex; flex-direction: column; gap: 6px; }
+
+  .check-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .check-row input[type=checkbox] {
+    accent-color: var(--accent);
+    width: 14px;
+    height: 14px;
+    cursor: pointer;
+  }
+
+  /* Cornell sliders */
+  #cornell-opts { display: none; }
+
+  /* Output buttons */
+  .btn-group { display: flex; gap: 8px; }
+
+  .btn {
+    flex: 1;
+    padding: 10px;
+    border-radius: 8px;
+    border: none;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    transition: all 0.15s;
+  }
+
+  .btn-primary {
+    background: var(--accent);
+    color: #fff;
+  }
+  .btn-primary:hover { background: #3d6b5f; }
+
+  .btn-secondary {
+    background: var(--accent-light);
+    color: var(--accent);
+    border: 1.5px solid var(--accent);
+  }
+  .btn-secondary:hover { background: #d6e8e4; }
+
+  /* ── Preview ── */
+  .preview-area {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: auto;
+    padding: 24px;
+    background: #eceae5;
+  }
+
+  #preview-canvas {
+    box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+    display: block;
+    /* let the canvas dictate its own size */
+  }
+
+  /* ── Tour overlay ── */
+  #tour-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    pointer-events: none;
+  }
+  #tour-overlay.active { display: block; }
+
+  #tour-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0,0,0,0.45);
+    pointer-events: all;
+  }
+
+  #tour-highlight {
+    position: absolute;
+    border-radius: 8px;
+    box-shadow: 0 0 0 4px var(--accent), 0 0 0 9999px rgba(0,0,0,0.45);
+    pointer-events: none;
+    transition: all 0.3s ease;
+    z-index: 1001;
+  }
+
+  #tour-box {
+    position: absolute;
+    background: #fff;
+    border-radius: 12px;
+    padding: 18px 20px;
+    width: 260px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+    pointer-events: all;
+    z-index: 1002;
+    transition: all 0.3s ease;
+  }
+
+  #tour-box h3 {
+    font-size: 13px;
+    font-weight: 700;
+    margin-bottom: 6px;
+    color: var(--text);
+  }
+
+  #tour-box p {
+    font-size: 12px;
+    color: #555;
+    line-height: 1.6;
+    margin-bottom: 14px;
+  }
+
+  #tour-box .tour-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  #tour-step-count {
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  #tour-box .tour-btns {
+    display: flex;
+    gap: 6px;
+  }
+
+  #tour-close {
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    background: none;
+    border: none;
+    font-size: 16px;
+    cursor: pointer;
+    color: var(--text-muted);
+    line-height: 1;
+  }
+
+  /* divider */
+  hr.divider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 0 -18px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>筆記內頁產生器</h1>
+  <div style="display:flex;align-items:center;gap:10px;">
+    <div style="display:flex;align-items:center;gap:4px;background:#f0efeb;border-radius:8px;padding:3px 6px;">
+      <button onclick="adjustZoom(-0.1)" title="縮小" style="border:none;background:none;cursor:pointer;font-size:16px;line-height:1;color:var(--text-muted);padding:0 3px;">−</button>
+      <span id="zoom-label" style="font-size:11px;color:var(--text);min-width:36px;text-align:center;font-weight:500;">100%</span>
+      <button onclick="adjustZoom(0.1)" title="放大" style="border:none;background:none;cursor:pointer;font-size:16px;line-height:1;color:var(--text-muted);padding:0 3px;">+</button>
+      <button onclick="resetZoom()" title="重設" style="border:none;background:none;cursor:pointer;font-size:10px;color:var(--text-muted);padding:0 3px;margin-left:2px;">⟳</button>
+    </div>
+    <button id="tour-btn" onclick="startTour()" title="功能導覽" style="border:none;background:none;cursor:pointer;font-size:20px;line-height:1;padding:2px;">💡</button>
+  </div>
+</header>
+
+<div class="workspace">
+
+  <!-- ── Left Panel ── -->
+  <aside class="panel">
+
+    <!-- Layout -->
+    <div>
+      <div class="section-label">版型</div>
+      <div class="layout-grid">
+        <button class="layout-btn active" data-layout="lined" onclick="setLayout('lined',this)">
+          <svg viewBox="0 0 36 28"><line x1="4" y1="7" x2="32" y2="7" stroke="#888" stroke-width="1.2"/><line x1="4" y1="13" x2="32" y2="13" stroke="#888" stroke-width="1.2"/><line x1="4" y1="19" x2="32" y2="19" stroke="#888" stroke-width="1.2"/><line x1="4" y1="25" x2="32" y2="25" stroke="#888" stroke-width="1.2"/></svg>
+          <span>橫線</span>
+        </button>
+        <button class="layout-btn" data-layout="grid" onclick="setLayout('grid',this)">
+          <svg viewBox="0 0 36 28"><line x1="4" y1="7" x2="32" y2="7" stroke="#888" stroke-width="1.2"/><line x1="4" y1="14" x2="32" y2="14" stroke="#888" stroke-width="1.2"/><line x1="4" y1="21" x2="32" y2="21" stroke="#888" stroke-width="1.2"/><line x1="11" y1="3" x2="11" y2="27" stroke="#888" stroke-width="1.2"/><line x1="18" y1="3" x2="18" y2="27" stroke="#888" stroke-width="1.2"/><line x1="25" y1="3" x2="25" y2="27" stroke="#888" stroke-width="1.2"/></svg>
+          <span>方格</span>
+        </button>
+        <button class="layout-btn" data-layout="dot" onclick="setLayout('dot',this)">
+          <svg viewBox="0 0 36 28"><circle cx="9" cy="7" r="1.2" fill="#888"/><circle cx="18" cy="7" r="1.2" fill="#888"/><circle cx="27" cy="7" r="1.2" fill="#888"/><circle cx="9" cy="14" r="1.2" fill="#888"/><circle cx="18" cy="14" r="1.2" fill="#888"/><circle cx="27" cy="14" r="1.2" fill="#888"/><circle cx="9" cy="21" r="1.2" fill="#888"/><circle cx="18" cy="21" r="1.2" fill="#888"/><circle cx="27" cy="21" r="1.2" fill="#888"/></svg>
+          <span>點陣</span>
+        </button>
+        <button class="layout-btn" data-layout="cornell" onclick="setLayout('cornell',this)">
+          <svg viewBox="0 0 36 28"><rect x="2" y="2" width="32" height="24" rx="1" fill="none" stroke="#888" stroke-width="1"/><line x1="12" y1="2" x2="12" y2="22" stroke="#888" stroke-width="1.2"/><line x1="2" y1="22" x2="34" y2="22" stroke="#888" stroke-width="1.2"/></svg>
+          <span>康乃爾</span>
+        </button>
+      </div>
+    </div>
+
+    <hr class="divider">
+
+    <!-- Page settings -->
+    <div>
+      <div class="section-label">頁面</div>
+
+      <div class="param-row">
+        <label>紙張尺寸</label>
+        <div class="right" style="gap:4px">
+          <select id="paper-size" onchange="onPaperPreset()">
+            <option value="A4">A4 (210×297)</option>
+            <option value="A5">A5 (148×210)</option>
+            <option value="B5">B5 (176×250)</option>
+            <option value="Letter">Letter (216×279)</option>
+            <option value="Square">正方形 (150×150)</option>
+            <option value="custom">自訂</option>
+          </select>
+          <button id="orient-btn" onclick="toggleOrientation()" title="切換橫向/直向" style="border:1.5px solid var(--border);background:#fff;border-radius:6px;padding:3px 7px;cursor:pointer;font-size:13px;">⬌</button>
+        </div>
+      </div>
+      <div id="custom-size-row" style="display:none;margin-bottom:10px;">
+        <div style="display:flex;align-items:center;gap:6px;font-size:12px;">
+          <label style="white-space:nowrap">寬</label>
+          <input type="number" id="custom-w" value="210" min="50" max="500" oninput="render()" style="width:56px;font-size:12px;border:1.5px solid var(--border);border-radius:6px;padding:3px 6px;">
+          <span style="color:var(--text-muted)">mm</span>
+          <label style="white-space:nowrap">高</label>
+          <input type="number" id="custom-h" value="297" min="50" max="700" oninput="render()" style="width:56px;font-size:12px;border:1.5px solid var(--border);border-radius:6px;padding:3px 6px;">
+          <span style="color:var(--text-muted)">mm</span>
+        </div>
+      </div>
+
+      <div class="param-row">
+        <label>邊距</label>
+        <div class="right">
+          <input type="range" id="margin" min="5" max="40" value="20" oninput="updateVal(this,'margin-val');render()">
+          <span class="val" id="margin-val">20mm</span>
+        </div>
+      </div>
+
+      <div class="param-row">
+        <label>格距 / 行距</label>
+        <div class="right">
+          <input type="range" id="spacing" min="4" max="12" value="7" oninput="updateVal(this,'spacing-val');render()">
+          <span class="val" id="spacing-val">7mm</span>
+        </div>
+      </div>
+
+      <div class="param-row">
+        <label>線條粗細</label>
+        <div class="right">
+          <input type="range" id="line-width" min="1" max="5" value="2" step="0.5" oninput="updateVal(this,'lw-val','×0.5');render()">
+          <span class="val" id="lw-val">1px</span>
+        </div>
+      </div>
+
+      <div class="param-row">
+        <label>邊框寬度</label>
+        <div class="right">
+          <input type="range" id="border-width" min="0" max="6" value="1" step="0.5" oninput="updateVal(this,'bw-val','×0.5');render()">
+          <span class="val" id="bw-val">0.5px</span>
+        </div>
+      </div>
+    </div>
+
+    <hr class="divider">
+
+    <!-- Cornell options -->
+    <div id="cornell-opts">
+      <div class="section-label">康乃爾設定</div>
+      <div class="param-row">
+        <label>左欄寬度</label>
+        <div class="right">
+          <input type="range" id="cornell-col" min="20" max="40" value="28" oninput="updateVal(this,'ccol-val','%');render()">
+          <span class="val" id="ccol-val">28%</span>
+        </div>
+      </div>
+      <div class="param-row">
+        <label>摘要區高度</label>
+        <div class="right">
+          <input type="range" id="cornell-sum" min="10" max="30" value="18" oninput="updateVal(this,'csum-val','%');render()">
+          <span class="val" id="csum-val">18%</span>
+        </div>
+      </div>
+      <hr class="divider" style="margin-bottom:10px">
+    </div>
+
+    <!-- Colors -->
+    <div>
+      <div class="section-label">色彩</div>
+      <div class="color-section">
+
+        <!-- Paper color -->
+        <div>
+          <div class="color-category">紙張顏色</div>
+          <div class="color-row">
+            <div class="swatch-group" id="paper-swatches">
+              <!-- filled by JS -->
+            </div>
+            <input type="color" id="paper-custom" value="#ffffff" oninput="setCustomColor('paper',this.value)">
+          </div>
+        </div>
+
+        <!-- Line color -->
+        <div>
+          <div class="color-category">線條顏色</div>
+          <div class="color-row">
+            <div class="swatch-group" id="line-swatches">
+            </div>
+            <input type="color" id="line-custom" value="#c8c8c8" oninput="setCustomColor('line',this.value)">
+          </div>
+        </div>
+
+        <!-- Border color -->
+        <div>
+          <div class="color-category">邊框顏色</div>
+          <div class="color-row">
+            <div class="swatch-group" id="border-swatches">
+            </div>
+            <input type="color" id="border-custom" value="#888888" oninput="setCustomColor('border',this.value)">
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <hr class="divider">
+
+    <!-- Header elements -->
+    <div>
+      <div class="section-label">頁首元素</div>
+      <div class="check-grid" style="margin-bottom:10px;">
+        <label class="check-row"><input type="checkbox" id="h-title" onchange="render()"> 標題欄</label>
+        <label class="check-row"><input type="checkbox" id="h-date" onchange="render()"> 日期欄</label>
+      </div>
+      <div class="param-row">
+        <label>頁首高度</label>
+        <div class="right">
+          <input type="range" id="header-height" min="8" max="40" value="14" oninput="updateVal(this,'hh-val');render()">
+          <span class="val" id="hh-val">14mm</span>
+        </div>
+      </div>
+    </div>
+
+    <hr class="divider">
+
+    <!-- Output -->
+    <div>
+      <div class="section-label">匯出</div>
+      <div class="btn-group">
+        <button class="btn btn-primary" onclick="exportPNG()">↓ PNG</button>
+        <button class="btn btn-secondary" onclick="exportPDF()">↓ PDF</button>
+      </div>
+    </div>
+
+    <hr class="divider">
+
+    <!-- Templates -->
+    <div>
+      <div class="section-label">模板</div>
+      <div style="display:flex;gap:6px;margin-bottom:8px;">
+        <input type="text" id="tpl-name" placeholder="模板名稱" style="flex:1;font-size:12px;border:1.5px solid var(--border);border-radius:6px;padding:4px 8px;outline:none;">
+        <button class="btn btn-secondary" style="flex:0 0 auto;padding:4px 10px;" onclick="saveTemplate()">儲存</button>
+      </div>
+      <div id="tpl-list" style="display:flex;flex-direction:column;gap:5px;"></div>
+    </div>
+
+  </aside>
+
+  <!-- ── Resizer ── -->
+  <div class="resizer" id="resizer"></div>
+
+  <!-- ── Preview ── -->
+  <main class="preview-area">
+    <canvas id="preview-canvas"></canvas>
+  </main>
+
+</div>
+
+<!-- ── Tour Overlay ── -->
+<div id="tour-overlay">
+  <div id="tour-backdrop" onclick="endTour()"></div>
+  <div id="tour-highlight"></div>
+  <div id="tour-box">
+    <button id="tour-close" onclick="endTour()">✕</button>
+    <h3 id="tour-title"></h3>
+    <p id="tour-desc"></p>
+    <div class="tour-footer">
+      <span id="tour-step-count"></span>
+      <div class="tour-btns">
+        <button class="btn btn-secondary" style="padding:5px 12px;font-size:11px;" onclick="prevTourStep()">上一步</button>
+        <button class="btn btn-primary" style="padding:5px 12px;font-size:11px;" id="tour-next-btn" onclick="nextTourStep()">下一步</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─── Color palettes ───────────────────────────────────────────────
+const PALETTES = {
+  paper: {
+    "極簡": ["#ffffff","#f5f5f5","#f0f0f0","#e8e8e8"],
+    "文青": ["#f4f0eb","#eae6e0","#e8ede9","#e6e9f0"],
+    "牛皮": ["#f5e6c8","#ede0b8","#dfd0a0","#c8b890"],
+  },
+  line: {
+    "極簡": ["#d0d0d0","#b0b0b0","#888888","#333333"],
+    "文青": ["#c2b9af","#a8c4b8","#b4bece","#c4b4c4"],
+    "牛皮": ["#c4a870","#a89060","#907850","#70583a"],
+  },
+  border: {
+    "極簡": ["#cccccc","#999999","#555555","#222222"],
+    "文青": ["#9aafa0","#8898a8","#a09898","#8a9888"],
+    "牛皮": ["#b09060","#987848","#805830","#604020"],
+  }
+};
+
+const state = {
+  layout: 'lined',
+  paper: '#ffffff',
+  line: '#c8c8c8',
+  border: '#888888',
+};
+
+function buildSwatches(target, type) {
+  const container = document.getElementById(target+'-swatches');
+  container.innerHTML = '';
+  Object.entries(PALETTES[type]).forEach(([cat, colors]) => {
+    colors.forEach(c => {
+      const d = document.createElement('div');
+      d.className = 'swatch' + (state[type] === c ? ' active' : '');
+      d.style.background = c;
+      d.title = cat + ' ' + c;
+      d.onclick = () => {
+        state[type] = c;
+        document.getElementById(type+'-custom').value = c;
+        buildSwatches(target, type);
+        render();
+      };
+      container.appendChild(d);
+    });
+  });
+}
+
+function setCustomColor(type, val) {
+  state[type] = val;
+  const target = type;
+  // deselect swatches
+  document.querySelectorAll('#'+target+'-swatches .swatch').forEach(s => s.classList.remove('active'));
+  render();
+}
+
+// init swatches
+buildSwatches('paper','paper');
+buildSwatches('line','line');
+buildSwatches('border','border');
+
+// ─── Helpers ──────────────────────────────────────────────────────
+const PPI = 96; // screen pixels per inch
+const MM2PX = PPI / 25.4;
+
+const PAPER_SIZES = {
+  A4:     { w: 210, h: 297 },
+  A5:     { w: 148, h: 210 },
+  B5:     { w: 176, h: 250 },
+  Letter: { w: 216, h: 279 },
+  Square: { w: 150, h: 150 },
+};
+
+let isLandscape = false;
+
+function onPaperPreset() {
+  const val = document.getElementById('paper-size').value;
+  document.getElementById('custom-size-row').style.display = val === 'custom' ? 'block' : 'none';
+  if (val !== 'custom') {
+    const sz = PAPER_SIZES[val];
+    document.getElementById('custom-w').value = isLandscape ? sz.h : sz.w;
+    document.getElementById('custom-h').value = isLandscape ? sz.w : sz.h;
+  }
+  render();
+}
+
+function toggleOrientation() {
+  isLandscape = !isLandscape;
+  const btn = document.getElementById('orient-btn');
+  btn.textContent = isLandscape ? '⬍' : '⬌';
+  btn.title = isLandscape ? '目前：橫向' : '目前：直向';
+  const val = document.getElementById('paper-size').value;
+  if (val !== 'custom') {
+    const sz = PAPER_SIZES[val];
+    document.getElementById('custom-w').value = isLandscape ? sz.h : sz.w;
+    document.getElementById('custom-h').value = isLandscape ? sz.w : sz.h;
+  } else {
+    // swap custom w/h
+    const w = document.getElementById('custom-w').value;
+    const h = document.getElementById('custom-h').value;
+    document.getElementById('custom-w').value = h;
+    document.getElementById('custom-h').value = w;
+  }
+  render();
+}
+
+function getPaperPx() {
+  const preset = document.getElementById('paper-size').value;
+  let wMM, hMM;
+  if (preset === 'custom') {
+    wMM = Math.max(50, +document.getElementById('custom-w').value || 210);
+    hMM = Math.max(50, +document.getElementById('custom-h').value || 297);
+  } else {
+    const sz = PAPER_SIZES[preset];
+    wMM = isLandscape ? sz.h : sz.w;
+    hMM = isLandscape ? sz.w : sz.h;
+  }
+  return { w: wMM * MM2PX, h: hMM * MM2PX, wMM, hMM };
+}
+
+function getParams() {
+  const margin = +document.getElementById('margin').value;
+  const spacing = +document.getElementById('spacing').value;
+  const lw = +document.getElementById('line-width').value * 0.5;
+  const bw = +document.getElementById('border-width').value * 0.5;
+  const cornellCol = +document.getElementById('cornell-col').value / 100;
+  const cornellSum = +document.getElementById('cornell-sum').value / 100;
+  return { margin, spacing, lw, bw, cornellCol, cornellSum };
+}
+
+function updateVal(el, targetId, suffix) {
+  const v = el.value;
+  const id = targetId;
+  if (suffix === '%') {
+    document.getElementById(id).textContent = v + '%';
+  } else if (suffix === '×0.5') {
+    document.getElementById(id).textContent = (v * 0.5).toFixed(1) + 'px';
+  } else {
+    document.getElementById(id).textContent = v + 'mm';
+  }
+}
+
+function setLayout(l, btn) {
+  state.layout = l;
+  document.querySelectorAll('.layout-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('cornell-opts').style.display = l === 'cornell' ? 'block' : 'none';
+  render();
+}
+
+// ─── Draw ─────────────────────────────────────────────────────────
+function drawPage(ctx, wPx, hPx, scale) {
+  const p = getParams();
+  const s = scale;
+  const marginPx = p.margin * MM2PX * s;
+  const spacingPx = p.spacing * MM2PX * s;
+  const lw = p.lw * s;
+  const bw = p.bw * s;
+
+  // Paper bg
+  ctx.fillStyle = state.paper;
+  ctx.fillRect(0, 0, wPx, hPx);
+
+  const left   = marginPx;
+  const right  = wPx - marginPx;
+  const top    = marginPx;
+  const bottom = hPx - marginPx;
+
+  // Header — lives inside the content area (border 框內)
+  let headerH = 0;
+  const headerItems = ['h-title','h-date'];
+  const activeHeaders = headerItems.filter(id => document.getElementById(id).checked);
+  if (activeHeaders.length > 0) {
+    const headerHeightMM = +document.getElementById('header-height').value;
+    headerH = headerHeightMM * MM2PX * s;
+    drawHeader(ctx, left, right, top, headerH, activeHeaders, lw, s);
+  }
+
+  const contentTop = top + headerH;
+
+  ctx.strokeStyle = state.line;
+  ctx.lineWidth = lw;
+
+  if (state.layout === 'lined') {
+    drawLined(ctx, left, contentTop, right, bottom, spacingPx);
+  } else if (state.layout === 'grid') {
+    drawGrid(ctx, left, contentTop, right, bottom, spacingPx);
+  } else if (state.layout === 'dot') {
+    drawDot(ctx, left, contentTop, right, bottom, spacingPx, lw);
+  } else if (state.layout === 'cornell') {
+    drawCornell(ctx, left, contentTop, right, bottom, spacingPx, p.cornellCol, p.cornellSum, lw, s);
+  }
+
+  // Border — surrounds full content area (margin 內側)
+  if (bw > 0) {
+    ctx.strokeStyle = state.border;
+    ctx.lineWidth = bw;
+    ctx.strokeRect(left, top, right - left, bottom - top);
+  }
+}
+
+function drawHeader(ctx, left, right, top, headerH, items, lw, s) {
+  const lineY = top + headerH;
+  const baselineY = lineY - 6 * s;
+
+  ctx.strokeStyle = state.line;
+  ctx.lineWidth = lw;
+
+  const hasTitle = items.includes('h-title');
+  const hasDate = items.includes('h-date');
+
+  if (hasTitle && hasDate) {
+    // Title line takes left 60%, date label on right
+    const titleEnd = left + (right - left) * 0.6;
+    // Title underline
+    ctx.beginPath(); ctx.moveTo(left, baselineY); ctx.lineTo(titleEnd - 16*s, baselineY); ctx.stroke();
+    // Date label + underline on right
+    const fontSize = 9 * s;
+    ctx.fillStyle = state.line;
+    ctx.font = `${fontSize}px Helvetica Neue, Arial, sans-serif`;
+    ctx.fillText('Date', right - 80*s, baselineY);
+    ctx.beginPath(); ctx.moveTo(right - 60*s, baselineY); ctx.lineTo(right, baselineY); ctx.stroke();
+  } else if (hasTitle) {
+    // Full-width title underline
+    ctx.beginPath(); ctx.moveTo(left, baselineY); ctx.lineTo(right, baselineY); ctx.stroke();
+  } else if (hasDate) {
+    // Date label + underline on right only
+    const fontSize = 9 * s;
+    ctx.fillStyle = state.line;
+    ctx.font = `${fontSize}px Helvetica Neue, Arial, sans-serif`;
+    ctx.fillText('Date', right - 80*s, baselineY);
+    ctx.beginPath(); ctx.moveTo(right - 60*s, baselineY); ctx.lineTo(right, baselineY); ctx.stroke();
+  }
+
+  // Bottom separator line of header area
+  ctx.beginPath(); ctx.moveTo(left, lineY); ctx.lineTo(right, lineY); ctx.stroke();
+}
+
+function drawLined(ctx, l, t, r, b, sp) {
+  for (let y = t; y <= b + 0.5; y += sp) {
+    ctx.beginPath();
+    ctx.moveTo(l, y);
+    ctx.lineTo(r, y);
+    ctx.stroke();
+  }
+}
+
+function drawGrid(ctx, l, t, r, b, sp) {
+  for (let y = t; y <= b + 0.5; y += sp) {
+    ctx.beginPath(); ctx.moveTo(l, y); ctx.lineTo(r, y); ctx.stroke();
+  }
+  for (let x = l; x <= r + 0.5; x += sp) {
+    ctx.beginPath(); ctx.moveTo(x, t); ctx.lineTo(x, b); ctx.stroke();
+  }
+}
+
+function drawDot(ctx, l, t, r, b, sp, lw) {
+  const r2 = Math.max(lw * 1.2, 1);
+  ctx.fillStyle = state.line;
+  for (let y = t; y <= b + 0.5; y += sp) {
+    for (let x = l; x <= r + 0.5; x += sp) {
+      ctx.beginPath();
+      ctx.arc(x, y, r2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
+function drawCornell(ctx, l, t, r, b, sp, colRatio, sumRatio, lw, s) {
+  const totalW = r - l;
+  const totalH = b - t;
+  const colX = l + totalW * colRatio;
+  const sumY = b - totalH * sumRatio;
+
+  // Lines in main note area
+  ctx.strokeStyle = state.line;
+  ctx.lineWidth = lw;
+  for (let y = t; y <= sumY + 0.5; y += sp) {
+    ctx.beginPath(); ctx.moveTo(colX, y); ctx.lineTo(r, y); ctx.stroke();
+  }
+  // Lines in left cue column
+  for (let y = t; y <= sumY + 0.5; y += sp) {
+    ctx.beginPath(); ctx.moveTo(l, y); ctx.lineTo(colX - 8*s, y); ctx.stroke();
+  }
+  // Lines in summary area
+  for (let y = sumY + sp; y <= b + 0.5; y += sp) {
+    ctx.beginPath(); ctx.moveTo(l, y); ctx.lineTo(r, y); ctx.stroke();
+  }
+
+  // Structural lines
+  ctx.strokeStyle = state.border || '#999';
+  ctx.lineWidth = Math.max(lw * 1.5, 1 * s);
+
+  // Vertical divider
+  ctx.beginPath(); ctx.moveTo(colX, t); ctx.lineTo(colX, sumY); ctx.stroke();
+  // Horizontal divider (summary)
+  ctx.beginPath(); ctx.moveTo(l, sumY); ctx.lineTo(r, sumY); ctx.stroke();
+
+
+}
+
+// ─── Render ───────────────────────────────────────────────────────
+// ─── Zoom ─────────────────────────────────────────────────────────
+let zoomLevel = 1.0;
+
+function adjustZoom(delta) {
+  zoomLevel = Math.min(3, Math.max(0.3, +(zoomLevel + delta).toFixed(1)));
+  document.getElementById('zoom-label').textContent = Math.round(zoomLevel * 100) + '%';
+  render();
+}
+
+function resetZoom() {
+  zoomLevel = 1.0;
+  document.getElementById('zoom-label').textContent = '100%';
+  render();
+}
+
+function render() {
+  const canvas = document.getElementById('preview-canvas');
+  const paper = getPaperPx();
+  const area = canvas.parentElement;
+  const padding = 48;
+  const availW = area.clientWidth  - padding;
+  const availH = area.clientHeight - padding;
+
+  const A4_H_MM = 297;
+  const pxPerMM = (availH * 0.88) / A4_H_MM;
+
+  const wPx = paper.wMM * pxPerMM;
+  const hPx = paper.hMM * pxPerMM;
+  const clamp = Math.min(1, availW / wPx, availH / hPx);
+  const baseScale = pxPerMM * clamp;
+  const finalScale = baseScale * zoomLevel;
+
+  const displayW = paper.wMM * finalScale;
+  const displayH = paper.hMM * finalScale;
+
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width  = displayW * dpr;
+  canvas.height = displayH * dpr;
+  canvas.style.width  = displayW + 'px';
+  canvas.style.height = displayH + 'px';
+
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  drawPage(ctx, displayW, displayH, finalScale / MM2PX);
+}
+
+// ─── Export ───────────────────────────────────────────────────────
+function getHighResCanvas() {
+  const paper = getPaperPx();
+  const PRINT_DPI = 300;
+  const scale = PRINT_DPI / 96;
+  const canvas = document.createElement('canvas');
+  canvas.width = paper.w * scale;
+  canvas.height = paper.h * scale;
+  const ctx = canvas.getContext('2d');
+  drawPage(ctx, paper.w * scale, paper.h * scale, scale);
+  return canvas;
+}
+
+function exportPNG() {
+  const canvas = getHighResCanvas();
+  const a = document.createElement('a');
+  a.download = 'notebook-page.png';
+  a.href = canvas.toDataURL('image/png');
+  a.click();
+}
+
+function exportPDF() {
+  const { jsPDF } = window.jspdf;
+  const paper = getPaperPx();
+  const wMM = paper.wMM, hMM = paper.hMM;
+
+  const canvas = getHighResCanvas();
+  const imgData = canvas.toDataURL('image/png');
+
+  const doc = new jsPDF({
+    orientation: hMM >= wMM ? 'p' : 'l',
+    unit: 'mm',
+    format: [wMM, hMM],
+  });
+
+  doc.addImage(imgData, 'PNG', 0, 0, wMM, hMM);
+  doc.save('notebook-page.pdf');
+}
+
+// ─── Templates (localStorage) ────────────────────────────────────
+// ─── Resizer drag logic ───────────────────────────────────────────
+(function() {
+  const resizer = document.getElementById('resizer');
+  const panel   = document.querySelector('.panel');
+  let startX, startW;
+
+  resizer.addEventListener('mousedown', e => {
+    startX = e.clientX;
+    startW = panel.offsetWidth;
+    resizer.classList.add('dragging');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    const onMove = e => {
+      const dx = e.clientX - startX;
+      const newW = Math.min(520, Math.max(200, startW + dx));
+      panel.style.width = newW + 'px';
+      render();
+    };
+    const onUp = () => {
+      resizer.classList.remove('dragging');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+
+  // Touch support
+  resizer.addEventListener('touchstart', e => {
+    startX = e.touches[0].clientX;
+    startW = panel.offsetWidth;
+    const onMove = e => {
+      const dx = e.touches[0].clientX - startX;
+      const newW = Math.min(520, Math.max(200, startW + dx));
+      panel.style.width = newW + 'px';
+      render();
+    };
+    const onUp = () => {
+      document.removeEventListener('touchmove', onMove);
+      document.removeEventListener('touchend', onUp);
+    };
+    document.addEventListener('touchmove', onMove);
+    document.addEventListener('touchend', onUp);
+  });
+})();
+
+function updatePanelWidth(el) {
+  const w = el.value;
+  document.getElementById('pw-val').textContent = w + 'px';
+  document.querySelector('.panel').style.width = w + 'px';
+}
+
+function getSettings() {
+  return {
+    layout: state.layout,
+    paper:  state.paper,
+    line:   state.line,
+    border: state.border,
+    paperSize:   document.getElementById('paper-size').value,
+    customW:     document.getElementById('custom-w').value,
+    customH:     document.getElementById('custom-h').value,
+    isLandscape,
+    margin:      document.getElementById('margin').value,
+    spacing:     document.getElementById('spacing').value,
+    lineWidth:   document.getElementById('line-width').value,
+    borderWidth: document.getElementById('border-width').value,
+    cornellCol:  document.getElementById('cornell-col').value,
+    cornellSum:  document.getElementById('cornell-sum').value,
+    hTitle:      document.getElementById('h-title').checked,
+    hDate:       document.getElementById('h-date').checked,
+    headerHeight: document.getElementById('header-height').value,
+  };
+}
+
+function applySettings(s) {
+  // layout
+  state.layout = s.layout || 'lined';
+  document.querySelectorAll('.layout-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.layout === state.layout);
+  });
+  document.getElementById('cornell-opts').style.display = state.layout === 'cornell' ? 'block' : 'none';
+
+  // colors
+  state.paper  = s.paper  || '#ffffff';
+  state.line   = s.line   || '#c8c8c8';
+  state.border = s.border || '#888888';
+  document.getElementById('paper-custom').value  = state.paper;
+  document.getElementById('line-custom').value   = state.line;
+  document.getElementById('border-custom').value = state.border;
+  buildSwatches('paper','paper');
+  buildSwatches('line','line');
+  buildSwatches('border','border');
+
+  // paper size
+  isLandscape = s.isLandscape || false;
+  document.getElementById('orient-btn').textContent = isLandscape ? '⬍' : '⬌';
+  document.getElementById('paper-size').value = s.paperSize || 'A4';
+  document.getElementById('custom-w').value = s.customW || 210;
+  document.getElementById('custom-h').value = s.customH || 297;
+  document.getElementById('custom-size-row').style.display = s.paperSize === 'custom' ? 'block' : 'none';
+
+  // sliders
+  const set = (id, val, labelId, suffix) => {
+    document.getElementById(id).value = val;
+    updateVal(document.getElementById(id), labelId, suffix);
+  };
+  set('margin',       s.margin      || 20, 'margin-val', '');
+  set('spacing',      s.spacing     || 7,  'spacing-val', '');
+  set('line-width',   s.lineWidth   || 2,  'lw-val', '×0.5');
+  set('border-width', s.borderWidth || 1,  'bw-val', '×0.5');
+  set('cornell-col',  s.cornellCol  || 28, 'ccol-val', '%');
+  set('cornell-sum',  s.cornellSum  || 18, 'csum-val', '%');
+  set('header-height', s.headerHeight || 14, 'hh-val', '');
+
+  // header
+  document.getElementById('h-title').checked = !!s.hTitle;
+  document.getElementById('h-date').checked  = !!s.hDate;
+
+  render();
+}
+
+function saveTemplate() {
+  const name = document.getElementById('tpl-name').value.trim();
+  if (!name) { document.getElementById('tpl-name').focus(); return; }
+  const all = JSON.parse(localStorage.getItem('nb_templates') || '{}');
+  all[name] = getSettings();
+  localStorage.setItem('nb_templates', JSON.stringify(all));
+  document.getElementById('tpl-name').value = '';
+  renderTemplateList();
+}
+
+function deleteTemplate(name) {
+  const all = JSON.parse(localStorage.getItem('nb_templates') || '{}');
+  delete all[name];
+  localStorage.setItem('nb_templates', JSON.stringify(all));
+  renderTemplateList();
+}
+
+function renderTemplateList() {
+  const all = JSON.parse(localStorage.getItem('nb_templates') || '{}');
+  const list = document.getElementById('tpl-list');
+  const names = Object.keys(all);
+  if (names.length === 0) {
+    list.innerHTML = '<div style="font-size:11px;color:var(--text-muted);padding:2px 0">尚無儲存的模板</div>';
+    return;
+  }
+  list.innerHTML = names.map(n => `
+    <div style="display:flex;align-items:center;gap:5px;">
+      <button onclick="applySettings(JSON.parse(localStorage.getItem('nb_templates')||'{}')['${CSS.escape(n)}']||{})"
+        style="flex:1;text-align:left;font-size:11px;border:1.5px solid var(--border);background:#fff;border-radius:6px;padding:5px 8px;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+        title="${n}">${n}</button>
+      <button onclick="deleteTemplate('${CSS.escape(n)}')"
+        style="flex:0 0 auto;font-size:12px;border:none;background:none;cursor:pointer;color:var(--text-muted);padding:2px 4px;" title="刪除">✕</button>
+    </div>`).join('');
+}
+
+
+// ─── Tour ─────────────────────────────────────────────────────────
+const TOUR_STEPS = [
+  {
+    selector: '.layout-grid',
+    title: '選擇版型',
+    desc: '從橫線、方格、點陣、康乃爾四種版型中選一個，右側預覽會即時更新。',
+    pos: 'right',
+  },
+  {
+    selector: '#paper-size',
+    title: '紙張尺寸',
+    desc: '選擇 A4、A5、B5、Letter 或正方形，也可以手動輸入自訂尺寸。旁邊的按鈕可以切換橫向／直向。',
+    pos: 'right',
+  },
+  {
+    selector: '#margin',
+    title: '邊距與行距',
+    desc: '調整頁面留白和線條間隔。邊距影響內容區域大小，行距影響線條密度。',
+    pos: 'right',
+  },
+  {
+    selector: '#paper-swatches',
+    title: '色彩系統',
+    desc: '分別設定紙張、線條、邊框的顏色。提供極簡、文青莫蘭迪、牛皮紙三組色票，也可以用右側的選色器自由選色。',
+    pos: 'right',
+  },
+  {
+    selector: '.resizer',
+    title: '拖曳分隔線',
+    desc: '拖曳這條線可以調整左側面板的寬度，讓預覽區更大或更小。',
+    pos: 'right',
+  },
+  {
+    selector: '#preview-canvas',
+    title: '即時預覽',
+    desc: '所有設定都會即時反映在這裡。右上角的 − + 可以縮放預覽大小，不影響輸出品質。',
+    pos: 'left',
+  },
+  {
+    selector: '.btn-group',
+    title: '匯出',
+    desc: '完成後可以匯出 PNG（300dpi 高解析）或 PDF（適合直接列印）。',
+    pos: 'right',
+  },
+  {
+    selector: '#tpl-list',
+    title: '模板儲存',
+    desc: '輸入名稱後按儲存，所有設定會存在瀏覽器裡，下次開啟可以直接載入。',
+    pos: 'right',
+  },
+];
+
+let tourStep = 0;
+
+function startTour() {
+  tourStep = 0;
+  document.getElementById('tour-overlay').classList.add('active');
+  showTourStep(tourStep);
+}
+
+function endTour() {
+  document.getElementById('tour-overlay').classList.remove('active');
+  localStorage.setItem('nb_tour_done', '1');
+}
+
+function showTourStep(i) {
+  const step = TOUR_STEPS[i];
+  const el = document.querySelector(step.selector);
+  const overlay = document.getElementById('tour-overlay');
+  const highlight = document.getElementById('tour-highlight');
+  const box = document.getElementById('tour-box');
+
+  document.getElementById('tour-title').textContent = step.title;
+  document.getElementById('tour-desc').textContent = step.desc;
+  document.getElementById('tour-step-count').textContent = `${i + 1} / ${TOUR_STEPS.length}`;
+  document.getElementById('tour-next-btn').textContent = i === TOUR_STEPS.length - 1 ? '完成 ✓' : '下一步';
+  document.querySelector('.tour-btns button:first-child').style.visibility = i === 0 ? 'hidden' : 'visible';
+
+  if (el) {
+    const rect = el.getBoundingClientRect();
+    const pad = 6;
+    highlight.style.left   = (rect.left - pad) + 'px';
+    highlight.style.top    = (rect.top  - pad) + 'px';
+    highlight.style.width  = (rect.width  + pad * 2) + 'px';
+    highlight.style.height = (rect.height + pad * 2) + 'px';
+
+    // Position tooltip box
+    const boxW = 260, boxH = 160;
+    const margin = 16;
+    let left, top;
+
+    if (step.pos === 'right') {
+      left = rect.right + margin;
+      if (left + boxW > window.innerWidth) left = rect.left - boxW - margin;
+    } else {
+      left = rect.left - boxW - margin;
+      if (left < 0) left = rect.right + margin;
+    }
+    top = rect.top + rect.height / 2 - boxH / 2;
+    top = Math.max(10, Math.min(window.innerHeight - boxH - 10, top));
+
+    box.style.left = left + 'px';
+    box.style.top  = top + 'px';
+  }
+}
+
+function nextTourStep() {
+  if (tourStep >= TOUR_STEPS.length - 1) { endTour(); return; }
+  tourStep++;
+  showTourStep(tourStep);
+}
+
+function prevTourStep() {
+  if (tourStep <= 0) return;
+  tourStep--;
+  showTourStep(tourStep);
+}
+
+// ─── Init ────────────────────────────────────────────────────────
+window.addEventListener('resize', render);
+// Set initial display values
+updateVal(document.getElementById('margin'), 'margin-val', '');
+updateVal(document.getElementById('spacing'), 'spacing-val', '');
+updateVal(document.getElementById('line-width'), 'lw-val', '×0.5');
+updateVal(document.getElementById('border-width'), 'bw-val', '×0.5');
+updateVal(document.getElementById('cornell-col'), 'ccol-val', '%');
+updateVal(document.getElementById('cornell-sum'), 'csum-val', '%');
+updateVal(document.getElementById('header-height'), 'hh-val', '');
+
+renderTemplateList();
+render();
+if (!localStorage.getItem('nb_tour_done')) { setTimeout(startTour, 400); }
+</script>
+</body>
+</html>
